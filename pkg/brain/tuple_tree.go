@@ -3,6 +3,7 @@ package brain
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -142,7 +143,7 @@ func getFrequencyVector(sentences []string, filter []string, delimiter []string,
 				}
 				frequencyWord := freSet[fmt.Sprintf("%d %s", position+1, wordCharacter)]
 				tuple := FrequencyTuple{
-					FrequencyWord: frequencyWord,
+					Frequency:     frequencyWord,
 					WordCharacter: wordCharacter,
 					Position:      position,
 				}
@@ -158,10 +159,127 @@ func getFrequencyVector(sentences []string, filter []string, delimiter []string,
 	return groupLen, tupleVector, frequencyVector
 }
 
+func tupleGenerate(groupLen map[int][][]string, tupleVector map[int][]FrequencyTuples, frequencyVector map[int][][]int) (map[int][]FrequencyTuples, map[int][][]WordCounts, map[int][][]WordCounts) {
+	sortedTupleVector := make(map[int][]FrequencyTuples)
+	wordCombinations := make(map[int][][]WordCounts)
+	wordCombinationsReverse := make(map[int][][]WordCounts)
+
+	for key := range groupLen {
+		rootSet := map[string]struct{}{"": {}}
+		for _, fre := range tupleVector[key] {
+			sortedFreReverse := fre.SortReverseByFrequency()
+			rootSet[sortedFreReverse[0].WordCharacter] = struct{}{}
+			sortedTupleVector[key] = append(sortedTupleVector[key], sortedFreReverse)
+		}
+
+		for _, fc := range frequencyVector[key] {
+			number := make(map[int]int)
+			for _, freq := range fc {
+				number[freq]++
+			}
+
+			result := make([]WordCount, 0, len(number))
+			for k, v := range number {
+				result = append(result, WordCount{Word: fmt.Sprint(k), Count: v})
+			}
+
+			sortedResult := make([]WordCount, len(result))
+			copy(sortedResult, result)
+			sort.Slice(sortedResult, func(i, j int) bool {
+				return sortedResult[i].Count > sortedResult[j].Count
+			})
+
+			sortedFre := make([]WordCount, len(result))
+			copy(sortedFre, result)
+			sort.Slice(sortedFre, func(i, j int) bool {
+				return sortedFre[i].Word > sortedFre[j].Word
+			})
+
+			// TODO IMME
+
+		}
+	}
+
+	// TODO IMME
+
+}
+
 type FrequencyTuple struct {
-	FrequencyWord int
+	Frequency     int
 	WordCharacter string
 	Position      int
 }
 
 type FrequencyTuples []FrequencyTuple
+
+func (f FrequencyTuples) SortReverseByFrequency() FrequencyTuples {
+	tuples := f.clone()
+	sort.Slice(tuples, func(i, j int) bool {
+		return tuples[i].Frequency > tuples[j].Frequency
+	})
+	return tuples
+}
+
+func (f FrequencyTuples) clone() FrequencyTuples {
+	tuples := make(FrequencyTuples, len(f))
+	for i, item := range f {
+		tuples[i] = item
+	}
+	return tuples
+}
+
+type WordCount struct {
+	Word  string
+	Count int
+}
+
+type WordCounts []WordCount
+
+type Counter[T comparable] struct {
+	counts map[T]int
+}
+
+func NewCounter[T comparable](items ...T) *Counter[T] {
+	counter := &Counter[T]{counts: make(map[T]int)}
+
+	for _, item := range items {
+		counter.counts[item]++
+	}
+
+	return counter
+}
+
+func (c *Counter[T]) MostCommon() []struct {
+	Item  T
+	Count int
+} {
+	type kv struct {
+		Item  T
+		Count int
+	}
+
+	var freqList []kv
+	for item, count := range c.counts {
+		freqList = append(freqList, kv{item, count})
+	}
+
+	sort.Slice(freqList, func(i, j int) bool {
+		return freqList[i].Count > freqList[j].Count
+	})
+
+	result := make([]struct {
+		Item  T
+		Count int
+	}, len(freqList))
+	for i, kv := range freqList {
+		result[i] = struct {
+			Item  T
+			Count int
+		}{
+			Item:  kv.Item,
+			Count: kv.Count,
+		}
+	}
+
+	return result
+}
