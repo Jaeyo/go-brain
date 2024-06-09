@@ -3,7 +3,6 @@ package brain
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 )
 
@@ -31,255 +30,102 @@ func NewTupleTree(
 	}
 }
 
-func getFrequencyVector(sentences []string, filter []string, delimiter []string, dataset string) (map[int][][]string, map[int][]FrequencyTuples, map[int][][]int) {
-	groupLen := make(map[int][][]string)
-	set := make(map[string][]string)
+func getFrequencyVector(sentences []string, filter []string, delimiter []string, dataset string) (map[int][][]string, map[int][][]Tuple, map[int][][]int) {
+	// map key (int): tokens count (`len(tokens`)
+	// map value ([][]string): tokens list
+	groupLen := make(map[int][]Tokens)
+	// map key (string): columnar index for tokens
+	// map value ([]string): tokens
+	set := make(map[string]Tokens)
 	lineID := 0
 
-	for _, sentence := range sentences {
-		for _, rgex := range filter {
-			re := regexp.MustCompile(rgex)
-			sentence = re.ReplaceAllString(sentence, "<*>")
+	for _, s := range sentences {
+		s = applyFiltersAndDelimiters(s, filter, delimiter, dataset)
+		s = strings.ReplaceAll(s, ",", ", ")
+		s = regexp.MustCompile(" +").ReplaceAllString(s, " ")
+		tokens := strings.Split(s, " ")
+		tokens = append([]string{fmt.Sprint(lineID)}, tokens...)
+
+		for i, token := range tokens {
+			set[fmt.Sprint(i)] = append(set[fmt.Sprint(i)], token)
 		}
-		for _, de := range delimiter {
-			re := regexp.MustCompile(de)
-			sentence = re.ReplaceAllString(sentence, "")
-		}
-		if dataset == "HealthApp" {
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-			sentence = strings.ReplaceAll(sentence, "|", "| ")
-		}
-		if dataset == "Android" {
-			sentence = strings.ReplaceAll(sentence, "(", "( ")
-			sentence = strings.ReplaceAll(sentence, ")", ") ")
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-		}
-		if dataset == "HPC" {
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-			sentence = strings.ReplaceAll(sentence, "-", "- ")
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-		}
-		if dataset == "BGL" {
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-			sentence = strings.ReplaceAll(sentence, "..", ".. ")
-			sentence = strings.ReplaceAll(sentence, "(", "( ")
-			sentence = strings.ReplaceAll(sentence, ")", ") ")
-		}
-		if dataset == "Hadoop" {
-			sentence = strings.ReplaceAll(sentence, "_", "_ ")
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-			sentence = strings.ReplaceAll(sentence, "(", "( ")
-			sentence = strings.ReplaceAll(sentence, ")", ") ")
-		}
-		if dataset == "HDFS" {
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-		}
-		if dataset == "Linux" {
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-		}
-		if dataset == "Spark" {
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-		}
-		if dataset == "Thunderbird" {
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-		}
-		if dataset == "Windows" {
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-			sentence = strings.ReplaceAll(sentence, "[", "[ ")
-			sentence = strings.ReplaceAll(sentence, "]", "] ")
-		}
-		if dataset == "Zookeeper" {
-			sentence = strings.ReplaceAll(sentence, ":", ": ")
-			sentence = strings.ReplaceAll(sentence, "=", "= ")
-		}
-		sentence = strings.ReplaceAll(sentence, ",", ", ")
-		sentence = regexp.MustCompile(" +").ReplaceAllString(sentence, " ")
-		words := strings.Split(sentence, " ")
-		words = append([]string{fmt.Sprint(lineID)}, words...)
-		length := 0
-		for _, token := range words {
-			set[fmt.Sprint(length)] = append(set[fmt.Sprint(length)], token)
-			length++
-		}
-		wordCnt := len(words)
-		groupLen[wordCnt] = append(groupLen[wordCnt], words)
+
+		lena := len(tokens)
+		groupLen[lena] = append(groupLen[lena], tokens) // first grouping: logs with the same length
 		lineID++
 	}
 
-	tupleVector := make(map[int][]FrequencyTuples)
+	tupleVector := make(map[int][][]Tuple)
 	frequencyVector := make(map[int][][]int)
-	maxWordCnt := 0
-	for keyWordCnt := range groupLen {
-		if keyWordCnt > maxWordCnt {
-			maxWordCnt = keyWordCnt
-		}
-	}
-	i := 0
-	freSet := make(map[string]int)
-	for i < maxWordCnt {
+	maxTokenLength := maxKey(groupLen) // a: the biggest length of the log in this dataset
+	// map key (string): `{i} {word}`, i: columnar index for tokens, word: token
+	// map value (int): count
+	freSet := make(map[string]int) // saving each word's frequency
+
+	for i := 0; i < maxTokenLength; i++ {
 		for _, word := range set[fmt.Sprint(i)] {
-			wordKey := fmt.Sprintf("%d %s", i, word)
-			freSet[wordKey]++
-		}
-		i++
-	}
-
-	for keyWordCnt, groupWords := range groupLen {
-		for _, word := range groupWords {
-			position := 0
-			frequencyTuples := FrequencyTuples{}
-			frequencyCommon := []int{}
-			skipLineID := 1
-			for _, wordCharacter := range word {
-				if skipLineID == 1 {
-					skipLineID = 0
-					continue
-				}
-				frequencyWord := freSet[fmt.Sprintf("%d %s", position+1, wordCharacter)]
-				tuple := FrequencyTuple{
-					Frequency:     frequencyWord,
-					WordCharacter: wordCharacter,
-					Position:      position,
-				}
-				frequencyTuples = append(frequencyTuples, tuple)
-				frequencyCommon = append(frequencyCommon, frequencyWord)
-				position++
-			}
-			tupleVector[keyWordCnt] = append(tupleVector[keyWordCnt], frequencyTuples)
-			frequencyVector[keyWordCnt] = append(frequencyVector[keyWordCnt], frequencyCommon)
+			key := fmt.Sprint(i) + " " + word
+			freSet[key]++
 		}
 	}
 
-	return groupLen, tupleVector, frequencyVector
-}
-
-func tupleGenerate(groupLen map[int][][]string, tupleVector map[int][]FrequencyTuples, frequencyVector map[int][][]int) (map[int][]FrequencyTuples, map[int][][]WordCounts, map[int][][]WordCounts) {
-	sortedTupleVector := make(map[int][]FrequencyTuples)
-	wordCombinations := make(map[int][][]WordCounts)
-	wordCombinationsReverse := make(map[int][][]WordCounts)
-
-	for key := range groupLen {
-		rootSet := map[string]struct{}{"": {}}
-		for _, fre := range tupleVector[key] {
-			sortedFreReverse := fre.SortReverseByFrequency()
-			rootSet[sortedFreReverse[0].WordCharacter] = struct{}{}
-			sortedTupleVector[key] = append(sortedTupleVector[key], sortedFreReverse)
-		}
-
-		for _, fc := range frequencyVector[key] {
-			number := make(map[int]int)
-			for _, freq := range fc {
-				number[freq]++
-			}
-
-			result := make([]WordCount, 0, len(number))
-			for k, v := range number {
-				result = append(result, WordCount{Word: fmt.Sprint(k), Count: v})
-			}
-
-			sortedResult := make([]WordCount, len(result))
-			copy(sortedResult, result)
-			sort.Slice(sortedResult, func(i, j int) bool {
-				return sortedResult[i].Count > sortedResult[j].Count
-			})
-
-			sortedFre := make([]WordCount, len(result))
-			copy(sortedFre, result)
-			sort.Slice(sortedFre, func(i, j int) bool {
-				return sortedFre[i].Word > sortedFre[j].Word
-			})
-
-			// TODO IMME
-
-		}
+	for key, group := range groupLen {
+	
 	}
 
+	_ = tupleVector
+	_ = frequencyVector
+	return nil, nil, nil
 	// TODO IMME
-
 }
 
-type FrequencyTuple struct {
+func applyFiltersAndDelimiters(s string, filter []string, delimiter []string, dataset string) string {
+	for _, rgex := range filter {
+		s = regexp.MustCompile(rgex).ReplaceAllString(s, "<*>")
+	}
+	for _, de := range delimiter {
+		s = strings.ReplaceAll(s, de, "")
+	}
+
+	switch dataset {
+	case "HealthApp":
+		s = applyDatasetSpecificReplacements(s, []string{":", "=", "\\|"}, ": ", "= ", "| ")
+	case "Android":
+		s = applyDatasetSpecificReplacements(s, []string{"\\(", "\\)"}, "( ", ") ")
+		s = applyDatasetSpecificReplacements(s, []string{":", "="}, ": ", "= ")
+	case "HPC":
+		s = applyDatasetSpecificReplacements(s, []string{"=", "-", ":"}, "= ", "- ", ": ")
+	case "BGL":
+		s = applyDatasetSpecificReplacements(s, []string{"=", "\\.\\.", "\\(", "\\)"}, "= ", ".. ", "( ", ") ")
+	case "Hadoop":
+		s = applyDatasetSpecificReplacements(s, []string{"_", ":", "=", "\\(", "\\)"}, "_ ", ": ", "= ", "( ", ") ")
+	case "HDFS":
+		s = applyDatasetSpecificReplacements(s, []string{":"}, ": ")
+	case "Linux":
+		s = applyDatasetSpecificReplacements(s, []string{"=", ":"}, "= ", ": ")
+	case "Spark":
+		s = applyDatasetSpecificReplacements(s, []string{":"}, ": ")
+	case "Thunderbird":
+		s = applyDatasetSpecificReplacements(s, []string{":", "="}, ": ", "= ")
+	case "Windows":
+		s = applyDatasetSpecificReplacements(s, []string{":", "=", "\\[", "\\]"}, ": ", "= ", "[ ", "] ")
+	case "Zookeeper":
+		s = applyDatasetSpecificReplacements(s, []string{":", "="}, ": ", "= ")
+	}
+	return s
+}
+
+func applyDatasetSpecificReplacements(s string, patterns []string, replacements ...string) string {
+	for i, pattern := range patterns {
+		s = regexp.MustCompile(pattern).ReplaceAllString(s, replacements[i])
+	}
+	return s
+}
+
+type Tuple struct {
 	Frequency     int
 	WordCharacter string
 	Position      int
 }
 
-type FrequencyTuples []FrequencyTuple
-
-func (f FrequencyTuples) SortReverseByFrequency() FrequencyTuples {
-	tuples := f.clone()
-	sort.Slice(tuples, func(i, j int) bool {
-		return tuples[i].Frequency > tuples[j].Frequency
-	})
-	return tuples
-}
-
-func (f FrequencyTuples) clone() FrequencyTuples {
-	tuples := make(FrequencyTuples, len(f))
-	for i, item := range f {
-		tuples[i] = item
-	}
-	return tuples
-}
-
-type WordCount struct {
-	Word  string
-	Count int
-}
-
-type WordCounts []WordCount
-
-type Counter[T comparable] struct {
-	counts map[T]int
-}
-
-func NewCounter[T comparable](items ...T) *Counter[T] {
-	counter := &Counter[T]{counts: make(map[T]int)}
-
-	for _, item := range items {
-		counter.counts[item]++
-	}
-
-	return counter
-}
-
-func (c *Counter[T]) MostCommon() []struct {
-	Item  T
-	Count int
-} {
-	type kv struct {
-		Item  T
-		Count int
-	}
-
-	var freqList []kv
-	for item, count := range c.counts {
-		freqList = append(freqList, kv{item, count})
-	}
-
-	sort.Slice(freqList, func(i, j int) bool {
-		return freqList[i].Count > freqList[j].Count
-	})
-
-	result := make([]struct {
-		Item  T
-		Count int
-	}, len(freqList))
-	for i, kv := range freqList {
-		result[i] = struct {
-			Item  T
-			Count int
-		}{
-			Item:  kv.Item,
-			Count: kv.Count,
-		}
-	}
-
-	return result
-}
+type Tokens []string
